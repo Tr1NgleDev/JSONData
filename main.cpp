@@ -4,36 +4,345 @@
 
 using namespace fdm;
 
+#include "strUtils.h"
+
 // Initialize the DLLMain
 initDLL
 
-$hook(void, StateGame, init, StateManager& s)
-{
-	// Your code that runs at first frame here (it calls when you load into the world)
+#include "JSONData.h"
 
-	original(self, s);
+/*
+clientA->(server)->clientB:
+1. clientA->(server)
+{
+	"target": "EntityPlayer UUID"|("all"|null)|"!EntityPlayer UUID",				// specific|all|all_except
+	"packet": "name",
+	"data": json
+}
+2. (server)->clientB
+{
+	"packet": "name",
+	"data": json,
+	"from":
+	{
+		"uuid": "EntityPlayer UUID",
+		"name": "Player Name"
+	}
+}
+*/
+
+/*
+client->server
+{
+	"target": "server"
+	"packet": "name",
+	"data": json
+}
+*/
+
+/*
+server->client
+{
+	"from": "server"
+	"packet": "name",
+	"data": json
+}
+*/
+
+void cschandleJsonMessage(WorldClient* world, Player* player, const nlohmann::json& data, const stl::string& packet, const stl::uuid& from, const stl::string& fromName);
+void cshandleJsonMessage(WorldServer* world, double dt, const nlohmann::json& data, const stl::string& packet, uint32_t client);
+void schandleJsonMessage(WorldClient* world, Player* player, const nlohmann::json& data, const stl::string& packet);
+$hook(void, WorldServer, handleMessage, const Connection::InMessage& message, double dt)
+{
+	if (message.getPacketType() == JSONData::C_JSON)
+	{
+		if (!self->players.contains(message.getClient()))
+			return;
+
+		nlohmann::json j = nlohmann::json::parse(message.getStrData(), nullptr, true, true);
+
+		if (!j.contains("data") || !j.contains("target") || !j.contains("packet")) return;
+
+		if (j.at("target").is_string() && j["target"] == "server")
+		{
+			cshandleJsonMessage(self, dt, j["data"], j["packet"].get<std::string>(), message.getClient());
+			return;
+		}
+
+		Connection::Server::MessageTarget target = Connection::Server::TARGET_ALL_CLIENTS;
+		uint32_t targetHandle = 0;
+		{
+			auto& t = j["target"];
+			if (t.is_string() && t.size() > 2)
+			{
+				std::string tStr = t.get<std::string>();
+				trim(tStr);
+				toLower(tStr);
+
+				if (tStr == "all")
+				{
+					target = Connection::Server::TARGET_ALL_CLIENTS;
+					targetHandle = 0;
+				}
+				else
+				{
+					if (tStr.starts_with('!'))
+					{
+						target = Connection::Server::TARGET_ALL_CLIENTS_EXCEPT;
+						tStr = tStr.substr(1);
+					}
+					else
+					{
+						target = Connection::Server::TARGET_SPECIFIC_CLIENT;
+					}
+
+					stl::uuid uuid{};
+					try
+					{
+						uuid = uuid(tStr);
+					}
+					catch (const std::runtime_error& e)
+					{
+						//Console::printLine(Console::Mode(Console::RED, Console::BRIGHT), "invalid uuid");
+						return;
+					}
+					
+					if (self->entityPlayerIDs.contains(uuid))
+					{
+						auto& pl = self->entityPlayerIDs.at(uuid);
+						targetHandle = pl->handle;
+					}
+					else
+					{
+						target = Connection::Server::TARGET_ALL_CLIENTS;
+						targetHandle = 0;
+					}
+				}
+			}
+			j.erase("target");
+		}
+		auto& player = self->players.at(message.getClient());
+		
+		j["from"] = nlohmann::json
+		{
+			{ "uuid", std::string(stl::uuid::to_string(player.player->EntityPlayerID)) },
+			{ "name", std::string(player.displayName) }
+		};
+		if (!j.contains("packet") || !j.at("packet").is_string() || !j.contains("data"))
+			return;
+		stl::string str = j.dump();
+		if (str.size() > 1024 * 1024) // 1mb max
+			return;
+		self->server.sendMessage(Connection::OutMessage{ JSONData::S_JSON, str }, target, targetHandle, true);
+		return;
+	}
+	original(self, message, dt);
+void cschandleJsonMessage(WorldClient* world, Player* player, const nlohmann::json& data, const stl::string& packet, const stl::uuid& from, const stl::string& fromName);
+}
+$hook(void, WorldClient, handleMessage, const Connection::InMessage& message, Player* player)
+{
+	if (message.getPacketType() == JSONData::S_JSON)
+	{
+		nlohmann::json j = nlohmann::json::parse(message.getStrData(), nullptr, true, true);
+
+		if (!j.contains("packet") || !j.contains("data") || !j.contains("from") || !j.at("packet").is_string())
+			return;
+
+		if (j.at("from").is_object() && j.at("from").contains("name") && j.at("from").contains("uuid")
+			&& j.at("from").at("uuid").is_string() && j.at("from").at("name").is_string())
+		{
+			auto& from = j["from"];
+			std::string fromUUID = from["uuid"];
+			std::string fromName = from["name"];
+
+			stl::uuid uuid{};
+			try
+			{
+				uuid = uuid(fromUUID);
+			}
+			catch (const std::runtime_error& e)
+			{
+				//Console::printLine(Console::Mode(Console::RED, Console::BRIGHT), "invalid uuid");
+				return;
+			}
+
+			cschandleJsonMessage(self, player, j["data"], j["packet"].get<std::string>(), uuid, fromName);
+		}
+		else if (j.at("from").is_string() && j["from"] == "server")
+		{
+			schandleJsonMessage(self, player, j["data"], j["packet"].get<std::string>());
+		}
+
+		return;
+	}
+	original(self, message, player);
 }
 
-$hook(void, Player, update, World* world, double dt, EntityPlayer* entityPlayer)
-{
-	// Your code that runs every frame here (it only calls when you play in world, because its Player's function)
+inline std::unordered_map<stl::string, std::set<JSONData::CSCPacketCallback>> cscPacketCallbacks{};
+inline std::unordered_map<stl::string, std::set<JSONData::SCPacketCallback>> scPacketCallbacks{};
+inline std::unordered_map<stl::string, std::set<JSONData::CSPacketCallback>> csPacketCallbacks{};
 
-	original(self, world, dt, entityPlayer);
+extern "C" __declspec(dllexport) inline void addPacketCallback(const stl::string& packet, JSONData::CSCPacketCallback callback)
+{
+	if (fdm::isServer()) return;
+	if (!cscPacketCallbacks[packet].contains(callback))
+		cscPacketCallbacks[packet].insert(callback);
+}
+extern "C" __declspec(dllexport) inline void removePacketCallback(const stl::string& packet, JSONData::CSCPacketCallback callback)
+{
+	if (fdm::isServer()) return;
+	if (cscPacketCallbacks[packet].contains(callback))
+		cscPacketCallbacks[packet].erase(callback);
+}
+extern "C" __declspec(dllexport) inline void SCaddPacketCallback(const stl::string& packet, JSONData::SCPacketCallback callback)
+{
+	if (fdm::isServer()) return;
+	if (!scPacketCallbacks[packet].contains(callback))
+		scPacketCallbacks[packet].insert(callback);
+}
+extern "C" __declspec(dllexport) inline void SCremovePacketCallback(const stl::string& packet, JSONData::SCPacketCallback callback)
+{
+	if (fdm::isServer()) return;
+	if (scPacketCallbacks[packet].contains(callback))
+		scPacketCallbacks[packet].erase(callback);
+}
+extern "C" __declspec(dllexport) inline void CSaddPacketCallback(const stl::string& packet, JSONData::CSPacketCallback callback)
+{
+	if (!fdm::isServer()) return;
+	if (!csPacketCallbacks[packet].contains(callback))
+		csPacketCallbacks[packet].insert(callback);
+}
+extern "C" __declspec(dllexport) inline void CSremovePacketCallback(const stl::string& packet, JSONData::CSPacketCallback callback)
+{
+	if (!fdm::isServer()) return;
+	if (csPacketCallbacks[packet].contains(callback))
+		csPacketCallbacks[packet].erase(callback);
+}
+extern "C" __declspec(dllexport) inline void sendPacketAll(WorldClient* world, const stl::string& packet, const nlohmann::json& data)
+{
+	if (fdm::isServer()) return;
+	if (!world) return;
+	nlohmann::json j
+	{
+		{ "packet", packet },
+		{ "data", data },
+		{ "target", "all" }
+	};
+	stl::string str = j.dump();
+	if (str.size() > 1024 * 1024) // 1mb max
+		return;
+	world->client->sendMessage(Connection::OutMessage{ JSONData::C_JSON, str });
+}
+extern "C" __declspec(dllexport) inline void sendPacketSpecific(WorldClient* world, const stl::string& packet, const nlohmann::json& data, const stl::uuid& target)
+{
+	if (fdm::isServer()) return;
+	if (!world) return;
+	stl::string uuidStr = stl::uuid::to_string(target);
+	nlohmann::json j
+	{
+		{ "packet", packet },
+		{ "data", data },
+		{ "target", uuidStr }
+	};
+	stl::string str = j.dump();
+	if (str.size() > 1024 * 1024) // 1mb max
+		return;
+	world->client->sendMessage(Connection::OutMessage{ JSONData::C_JSON, str });
+}
+extern "C" __declspec(dllexport) inline void sendPacketAllExcept(WorldClient* world, const stl::string& packet, const nlohmann::json& data, const stl::uuid& target)
+{
+	if (fdm::isServer()) return;
+	if (!world) return;
+	stl::string uuidStr = stl::uuid::to_string(target);
+	nlohmann::json j
+	{
+		{ "packet", packet },
+		{ "data", data },
+		{ "target", std::format("!{}", uuidStr) }
+	};
+	stl::string str = j.dump();
+	if (str.size() > 1024 * 1024) // 1mb max
+		return;
+	world->client->sendMessage(Connection::OutMessage{ JSONData::C_JSON, str });
+}
+extern "C" __declspec(dllexport) inline void sendPacketServer(WorldClient* world, const stl::string& packet, const nlohmann::json& data)
+{
+	if (fdm::isServer()) return;
+	if (!world) return;
+	nlohmann::json j
+	{
+		{ "packet", packet },
+		{ "data", data },
+		{ "target", "server" }
+	};
+	stl::string str = j.dump();
+	if (str.size() > 1024 * 1024) // 1mb max
+		return;
+	world->client->sendMessage(Connection::OutMessage{ JSONData::C_JSON, str });
+}
+extern "C" __declspec(dllexport) inline void sendPacketClient(WorldServer* world, const stl::string& packet, const nlohmann::json& data, uint32_t client)
+{
+	if (!fdm::isServer()) return;
+	if (!world) return;
+	nlohmann::json j
+	{
+		{ "packet", packet },
+		{ "data", data },
+		{ "from", "server" }
+	};
+	stl::string str = j.dump();
+	if (str.size() > 1024 * 1024) // 1mb max
+		return;
+	world->server.sendMessage(Connection::OutMessage{ JSONData::S_JSON, str }, fdm::Connection::Server::TARGET_SPECIFIC_CLIENT, client);
+}
+extern "C" __declspec(dllexport) inline void broadcastPacket(WorldServer* world, const stl::string& packet, const nlohmann::json& data)
+{
+	if (!fdm::isServer()) return;
+	if (!world) return;
+	nlohmann::json j
+	{
+		{ "packet", packet },
+		{ "data", data },
+		{ "from", "server" }
+	};
+	stl::string str = j.dump();
+	if (str.size() > 1024 * 1024) // 1mb max
+		return;
+	world->server.sendMessage(Connection::OutMessage{ JSONData::S_JSON, str }, fdm::Connection::Server::TARGET_ALL_CLIENTS, 0);
 }
 
-$hook(bool, Player, keyInput, GLFWwindow* window, World* world, int key, int scancode, int action, int mods)
+void cschandleJsonMessage(WorldClient* world, Player* player, const nlohmann::json& data, const stl::string& packet, const stl::uuid& from, const stl::string& fromName)
 {
-	// Your code that runs when Key Input happens (check GLFW Keyboard Input tutorials)|(it only calls when you play in world, because it is a Player function)
-
-	return original(self, window, world, key, scancode, action, mods);
+	if (cscPacketCallbacks.contains(packet))
+	{
+		const auto& funcs = cscPacketCallbacks.at(packet);
+		for (auto& f : funcs)
+		{
+			f(world, player, data, from, fromName);
+		}
+	}
 }
 
-$hook(void, StateIntro, init, StateManager& s)
+void cshandleJsonMessage(WorldServer* world, double dt, const nlohmann::json& data, const stl::string& packet, uint32_t client)
 {
-	original(self, s);
+	if (csPacketCallbacks.contains(packet))
+	{
+		const auto& funcs = csPacketCallbacks.at(packet);
+		for (auto& f : funcs)
+		{
+			f(world, dt, data, client);
+		}
+	}
+}
 
-	// initialize opengl stuff
-	glewExperimental = true;
-	glewInit();
-	glfwInit();
+void schandleJsonMessage(WorldClient* world, Player* player, const nlohmann::json& data, const stl::string& packet)
+{
+	if (scPacketCallbacks.contains(packet))
+	{
+		const auto& funcs = scPacketCallbacks.at(packet);
+		for (auto& f : funcs)
+		{
+			f(world, player, data);
+		}
+	}
 }

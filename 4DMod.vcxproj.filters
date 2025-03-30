@@ -22,4 +22,12 @@
   <ItemGroup>
     <None Include="info.json5" />
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="JSONData.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="strUtils.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
 </Project>
