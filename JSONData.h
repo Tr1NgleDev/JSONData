@@ -43,7 +43,7 @@ namespace JSONData
 	{
 		if (!isLoaded())
 			return;
-		reinterpret_cast<void(__stdcall*)(WorldClient * world, const fdm::stl::string & packet, const nlohmann::json & data)>
+		reinterpret_cast<void(__stdcall*)(fdm::WorldClient * world, const fdm::stl::string & packet, const nlohmann::json & data)>
 			(fdm::getModFuncPointer(id, "sendPacketAll"))
 			(world, packet, data);
 	}
@@ -52,7 +52,7 @@ namespace JSONData
 	{
 		if (!isLoaded())
 			return;
-		reinterpret_cast<void(__stdcall*)(WorldClient * world, const fdm::stl::string & packet, const nlohmann::json & data, const fdm::stl::uuid & target)>
+		reinterpret_cast<void(__stdcall*)(fdm::WorldClient * world, const fdm::stl::string & packet, const nlohmann::json & data, const fdm::stl::uuid & target)>
 			(fdm::getModFuncPointer(id, "sendPacketSpecific"))
 			(world, packet, data, target);
 	}
@@ -61,7 +61,7 @@ namespace JSONData
 	{
 		if (!isLoaded())
 			return;
-		reinterpret_cast<void(__stdcall*)(WorldClient * world, const fdm::stl::string & packet, const nlohmann::json & data, const fdm::stl::uuid & target)>
+		reinterpret_cast<void(__stdcall*)(fdm::WorldClient * world, const fdm::stl::string & packet, const nlohmann::json & data, const fdm::stl::uuid & target)>
 			(fdm::getModFuncPointer(id, "sendPacketAllExcept"))
 			(world, packet, data, target);
 	}
@@ -89,7 +89,7 @@ namespace JSONData
 	{
 		if (!isLoaded())
 			return;
-		reinterpret_cast<void(__stdcall*)(WorldClient * world, const fdm::stl::string & packet, const nlohmann::json & data)>
+		reinterpret_cast<void(__stdcall*)(fdm::WorldClient * world, const fdm::stl::string & packet, const nlohmann::json & data)>
 			(fdm::getModFuncPointer(id, "sendPacketServer"))
 			(world, packet, data);
 	}
@@ -117,7 +117,7 @@ namespace JSONData
 	{
 		if (!isLoaded())
 			return;
-		reinterpret_cast<void(__stdcall*)(WorldServer * world, const fdm::stl::string & packet, const nlohmann::json & data, uint32_t)>
+		reinterpret_cast<void(__stdcall*)(fdm::WorldServer * world, const fdm::stl::string & packet, const nlohmann::json & data, uint32_t)>
 			(fdm::getModFuncPointer(id, "sendPacketClient"))
 			(world, packet, data, client);
 	}
