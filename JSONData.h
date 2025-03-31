@@ -126,7 +126,7 @@ namespace JSONData
 	{
 		if (!isLoaded())
 			return;
-		reinterpret_cast<void(__stdcall*)(WorldServer * world, const fdm::stl::string & packet, const nlohmann::json & data)>
+		reinterpret_cast<void(__stdcall*)(fdm::WorldServer * world, const fdm::stl::string & packet, const nlohmann::json & data)>
 			(fdm::getModFuncPointer(id, "broadcastPacket"))
 			(world, packet, data);
 	}
