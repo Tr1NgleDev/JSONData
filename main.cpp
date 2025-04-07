@@ -59,7 +59,23 @@ $hook(void, WorldServer, handleMessage, const Connection::InMessage& message, do
 		if (!self->players.contains(message.getClient()))
 			return;
 
-		nlohmann::json j = nlohmann::json::parse(message.getStrData(), nullptr, true, true);
+		std::string data = message.getStrData();
+		if (data.empty()) return;
+
+		nlohmann::json j;
+		try
+		{
+			j = nlohmann::json::parse(data, nullptr, true, true);
+		}
+		catch (const nlohmann::json::exception& e)
+		{
+			Console::printLine(
+				Console::Mode(Console::GREEN, Console::BRIGHT),
+				"JSONData::WorldServer::handleMessage:",
+				Console::Mode(Console::RED, Console::BRIGHT),
+				" Exception: Couldn't parse JSON: ", e.what());
+			return;
+		}
 
 		if (!j.contains("data") || !j.contains("target") || !j.contains("packet")) return;
 
@@ -137,13 +153,28 @@ $hook(void, WorldServer, handleMessage, const Connection::InMessage& message, do
 		return;
 	}
 	original(self, message, dt);
-void cschandleJsonMessage(WorldClient* world, Player* player, const nlohmann::json& data, const stl::string& packet, const stl::uuid& from, const stl::string& fromName);
 }
 $hook(void, WorldClient, handleMessage, const Connection::InMessage& message, Player* player)
 {
 	if (message.getPacketType() == JSONData::S_JSON)
 	{
-		nlohmann::json j = nlohmann::json::parse(message.getStrData(), nullptr, true, true);
+		std::string data = message.getStrData();
+		if (data.empty()) return;
+
+		nlohmann::json j;
+		try
+		{
+			j = nlohmann::json::parse(data, nullptr, true, true);
+		}
+		catch (const nlohmann::json::exception& e)
+		{
+			Console::printLine(
+				Console::Mode(Console::GREEN, Console::BRIGHT),
+				"JSONData::WorldClient::handleMessage:",
+				Console::Mode(Console::RED, Console::BRIGHT),
+				" Exception: Couldn't parse JSON: ", e.what());
+			return;
+		}
 
 		if (!j.contains("packet") || !j.contains("data") || !j.contains("from") || !j.at("packet").is_string())
 			return;
@@ -218,7 +249,7 @@ extern "C" __declspec(dllexport) inline void CSremovePacketCallback(const stl::s
 	if (csPacketCallbacks[packet].contains(callback))
 		csPacketCallbacks[packet].erase(callback);
 }
-extern "C" __declspec(dllexport) inline void sendPacketAll(WorldClient* world, const stl::string& packet, const nlohmann::json& data)
+extern "C" __declspec(dllexport) inline void sendPacketAll(WorldClient* world, const stl::string& packet, const nlohmann::json& data, bool reliable = true)
 {
 	if (fdm::isServer()) return;
 	if (!world) return;
@@ -231,9 +262,9 @@ extern "C" __declspec(dllexport) inline void sendPacketAll(WorldClient* world, c
 	stl::string str = j.dump();
 	if (str.size() > 1024 * 1024) // 1mb max
 		return;
-	world->client->sendMessage(Connection::OutMessage{ JSONData::C_JSON, str });
+	world->client->sendMessage(Connection::OutMessage{ JSONData::C_JSON, str }, reliable);
 }
-extern "C" __declspec(dllexport) inline void sendPacketSpecific(WorldClient* world, const stl::string& packet, const nlohmann::json& data, const stl::uuid& target)
+extern "C" __declspec(dllexport) inline void sendPacketSpecific(WorldClient* world, const stl::string& packet, const nlohmann::json& data, const stl::uuid& target, bool reliable = true)
 {
 	if (fdm::isServer()) return;
 	if (!world) return;
@@ -247,9 +278,9 @@ extern "C" __declspec(dllexport) inline void sendPacketSpecific(WorldClient* wor
 	stl::string str = j.dump();
 	if (str.size() > 1024 * 1024) // 1mb max
 		return;
-	world->client->sendMessage(Connection::OutMessage{ JSONData::C_JSON, str });
+	world->client->sendMessage(Connection::OutMessage{ JSONData::C_JSON, str }, reliable);
 }
-extern "C" __declspec(dllexport) inline void sendPacketAllExcept(WorldClient* world, const stl::string& packet, const nlohmann::json& data, const stl::uuid& target)
+extern "C" __declspec(dllexport) inline void sendPacketAllExcept(WorldClient* world, const stl::string& packet, const nlohmann::json& data, const stl::uuid& target, bool reliable = true)
 {
 	if (fdm::isServer()) return;
 	if (!world) return;
@@ -263,9 +294,9 @@ extern "C" __declspec(dllexport) inline void sendPacketAllExcept(WorldClient* wo
 	stl::string str = j.dump();
 	if (str.size() > 1024 * 1024) // 1mb max
 		return;
-	world->client->sendMessage(Connection::OutMessage{ JSONData::C_JSON, str });
+	world->client->sendMessage(Connection::OutMessage{ JSONData::C_JSON, str }, reliable);
 }
-extern "C" __declspec(dllexport) inline void sendPacketServer(WorldClient* world, const stl::string& packet, const nlohmann::json& data)
+extern "C" __declspec(dllexport) inline void sendPacketServer(WorldClient* world, const stl::string& packet, const nlohmann::json& data, bool reliable = true)
 {
 	if (fdm::isServer()) return;
 	if (!world) return;
@@ -278,9 +309,9 @@ extern "C" __declspec(dllexport) inline void sendPacketServer(WorldClient* world
 	stl::string str = j.dump();
 	if (str.size() > 1024 * 1024) // 1mb max
 		return;
-	world->client->sendMessage(Connection::OutMessage{ JSONData::C_JSON, str });
+	world->client->sendMessage(Connection::OutMessage{ JSONData::C_JSON, str }, reliable);
 }
-extern "C" __declspec(dllexport) inline void sendPacketClient(WorldServer* world, const stl::string& packet, const nlohmann::json& data, uint32_t client)
+extern "C" __declspec(dllexport) inline void sendPacketClient(WorldServer* world, const stl::string& packet, const nlohmann::json& data, uint32_t client, bool reliable = true)
 {
 	if (!fdm::isServer()) return;
 	if (!world) return;
@@ -293,9 +324,9 @@ extern "C" __declspec(dllexport) inline void sendPacketClient(WorldServer* world
 	stl::string str = j.dump();
 	if (str.size() > 1024 * 1024) // 1mb max
 		return;
-	world->server.sendMessage(Connection::OutMessage{ JSONData::S_JSON, str }, fdm::Connection::Server::TARGET_SPECIFIC_CLIENT, client);
+	world->server.sendMessage(Connection::OutMessage{ JSONData::S_JSON, str }, fdm::Connection::Server::TARGET_SPECIFIC_CLIENT, client, reliable);
 }
-extern "C" __declspec(dllexport) inline void broadcastPacket(WorldServer* world, const stl::string& packet, const nlohmann::json& data)
+extern "C" __declspec(dllexport) inline void broadcastPacket(WorldServer* world, const stl::string& packet, const nlohmann::json& data, bool reliable = true)
 {
 	if (!fdm::isServer()) return;
 	if (!world) return;
@@ -308,7 +339,7 @@ extern "C" __declspec(dllexport) inline void broadcastPacket(WorldServer* world,
 	stl::string str = j.dump();
 	if (str.size() > 1024 * 1024) // 1mb max
 		return;
-	world->server.sendMessage(Connection::OutMessage{ JSONData::S_JSON, str }, fdm::Connection::Server::TARGET_ALL_CLIENTS, 0);
+	world->server.sendMessage(Connection::OutMessage{ JSONData::S_JSON, str }, fdm::Connection::Server::TARGET_ALL_CLIENTS, 0, reliable);
 }
 
 void cschandleJsonMessage(WorldClient* world, Player* player, const nlohmann::json& data, const stl::string& packet, const stl::uuid& from, const stl::string& fromName)
