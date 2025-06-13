@@ -65,7 +65,7 @@ $hook(void, WorldServer, handleMessage, const Connection::InMessage& message, do
 		nlohmann::json j;
 		try
 		{
-			j = nlohmann::json::parse(data, nullptr, true, true);
+			j = nlohmann::json::from_cbor(data);
 		}
 		catch (const nlohmann::json::exception& e)
 		{
@@ -146,13 +146,13 @@ $hook(void, WorldServer, handleMessage, const Connection::InMessage& message, do
 		};
 		if (!j.contains("packet") || !j.at("packet").is_string() || !j.contains("data"))
 			return;
-		stl::string str = j.dump();
-		if (str.size() > 1024 * 1024) // 1mb max
+		std::vector<uint8_t> msgData = nlohmann::json::to_cbor(j);
+		if (msgData.size() > 1024 * 1024) // 1mb max
 			return;
-		self->server.sendMessage(Connection::OutMessage{ JSONData::S_JSON, str }, target, targetHandle, true);
+		self->server.sendMessage(Connection::OutMessage{ JSONData::S_JSON, msgData.data(), msgData.size() }, target, targetHandle, true);
 		return;
 	}
-	original(self, message, dt);
+	return original(self, message, dt);
 }
 $hook(void, WorldClient, handleMessage, const Connection::InMessage& message, Player* player)
 {
@@ -164,7 +164,7 @@ $hook(void, WorldClient, handleMessage, const Connection::InMessage& message, Pl
 		nlohmann::json j;
 		try
 		{
-			j = nlohmann::json::parse(data, nullptr, true, true);
+			j = nlohmann::json::from_cbor(data);
 		}
 		catch (const nlohmann::json::exception& e)
 		{
@@ -259,10 +259,10 @@ extern "C" __declspec(dllexport) inline void sendPacketAll(WorldClient* world, c
 		{ "data", data },
 		{ "target", "all" }
 	};
-	stl::string str = j.dump();
-	if (str.size() > 1024 * 1024) // 1mb max
+	std::vector<uint8_t> msgData = nlohmann::json::to_cbor(j);
+	if (msgData.size() > 1024 * 1024) // 1mb max
 		return;
-	world->client->sendMessage(Connection::OutMessage{ JSONData::C_JSON, str }, reliable);
+	world->client->sendMessage(Connection::OutMessage{ JSONData::C_JSON, msgData.data(), msgData.size() }, reliable);
 }
 extern "C" __declspec(dllexport) inline void sendPacketSpecific(WorldClient* world, const stl::string& packet, const nlohmann::json& data, const stl::uuid& target, bool reliable = true)
 {
@@ -275,10 +275,10 @@ extern "C" __declspec(dllexport) inline void sendPacketSpecific(WorldClient* wor
 		{ "data", data },
 		{ "target", uuidStr }
 	};
-	stl::string str = j.dump();
-	if (str.size() > 1024 * 1024) // 1mb max
+	std::vector<uint8_t> msgData = nlohmann::json::to_cbor(j);
+	if (msgData.size() > 1024 * 1024) // 1mb max
 		return;
-	world->client->sendMessage(Connection::OutMessage{ JSONData::C_JSON, str }, reliable);
+	world->client->sendMessage(Connection::OutMessage{ JSONData::C_JSON, msgData.data(), msgData.size() }, reliable);
 }
 extern "C" __declspec(dllexport) inline void sendPacketAllExcept(WorldClient* world, const stl::string& packet, const nlohmann::json& data, const stl::uuid& target, bool reliable = true)
 {
@@ -291,10 +291,10 @@ extern "C" __declspec(dllexport) inline void sendPacketAllExcept(WorldClient* wo
 		{ "data", data },
 		{ "target", std::format("!{}", uuidStr) }
 	};
-	stl::string str = j.dump();
-	if (str.size() > 1024 * 1024) // 1mb max
+	std::vector<uint8_t> msgData = nlohmann::json::to_cbor(j);
+	if (msgData.size() > 1024 * 1024) // 1mb max
 		return;
-	world->client->sendMessage(Connection::OutMessage{ JSONData::C_JSON, str }, reliable);
+	world->client->sendMessage(Connection::OutMessage{ JSONData::C_JSON, msgData.data(), msgData.size() }, reliable);
 }
 extern "C" __declspec(dllexport) inline void sendPacketServer(WorldClient* world, const stl::string& packet, const nlohmann::json& data, bool reliable = true)
 {
@@ -306,10 +306,10 @@ extern "C" __declspec(dllexport) inline void sendPacketServer(WorldClient* world
 		{ "data", data },
 		{ "target", "server" }
 	};
-	stl::string str = j.dump();
-	if (str.size() > 1024 * 1024) // 1mb max
+	std::vector<uint8_t> msgData = nlohmann::json::to_cbor(j);
+	if (msgData.size() > 1024 * 1024) // 1mb max
 		return;
-	world->client->sendMessage(Connection::OutMessage{ JSONData::C_JSON, str }, reliable);
+	world->client->sendMessage(Connection::OutMessage{ JSONData::C_JSON, msgData.data(), msgData.size() }, reliable);
 }
 extern "C" __declspec(dllexport) inline void sendPacketClient(WorldServer* world, const stl::string& packet, const nlohmann::json& data, uint32_t client, bool reliable = true)
 {
@@ -321,10 +321,10 @@ extern "C" __declspec(dllexport) inline void sendPacketClient(WorldServer* world
 		{ "data", data },
 		{ "from", "server" }
 	};
-	stl::string str = j.dump();
-	if (str.size() > 1024 * 1024) // 1mb max
+	std::vector<uint8_t> msgData = nlohmann::json::to_cbor(j);
+	if (msgData.size() > 1024 * 1024) // 1mb max
 		return;
-	world->server.sendMessage(Connection::OutMessage{ JSONData::S_JSON, str }, fdm::Connection::Server::TARGET_SPECIFIC_CLIENT, client, reliable);
+	world->server.sendMessage(Connection::OutMessage{ JSONData::S_JSON, msgData.data(), msgData.size() }, fdm::Connection::Server::TARGET_SPECIFIC_CLIENT, client, reliable);
 }
 extern "C" __declspec(dllexport) inline void broadcastPacket(WorldServer* world, const stl::string& packet, const nlohmann::json& data, bool reliable = true)
 {
@@ -336,10 +336,10 @@ extern "C" __declspec(dllexport) inline void broadcastPacket(WorldServer* world,
 		{ "data", data },
 		{ "from", "server" }
 	};
-	stl::string str = j.dump();
-	if (str.size() > 1024 * 1024) // 1mb max
+	std::vector<uint8_t> msgData = nlohmann::json::to_cbor(j);
+	if (msgData.size() > 1024 * 1024) // 1mb max
 		return;
-	world->server.sendMessage(Connection::OutMessage{ JSONData::S_JSON, str }, fdm::Connection::Server::TARGET_ALL_CLIENTS, 0, reliable);
+	world->server.sendMessage(Connection::OutMessage{ JSONData::S_JSON, msgData.data(), msgData.size() }, fdm::Connection::Server::TARGET_ALL_CLIENTS, 0, reliable);
 }
 
 void cschandleJsonMessage(WorldClient* world, Player* player, const nlohmann::json& data, const stl::string& packet, const stl::uuid& from, const stl::string& fromName)
