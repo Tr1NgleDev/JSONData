@@ -63,18 +63,28 @@ $hook(void, WorldServer, handleMessage, const Connection::InMessage& message, do
 		if (data.empty()) return;
 
 		nlohmann::json j;
+		bool cbor = true;
 		try
 		{
 			j = nlohmann::json::from_cbor(data);
 		}
 		catch (const nlohmann::json::exception& e)
 		{
-			Console::printLine(
-				Console::Mode(Console::GREEN, Console::BRIGHT),
-				"JSONData::WorldServer::handleMessage:",
-				Console::Mode(Console::RED, Console::BRIGHT),
-				" Exception: Couldn't parse JSON: ", e.what());
-			return;
+			// try normal json parsing
+			try
+			{
+				j = nlohmann::json::parse(data, nullptr, true, true);
+				cbor = false;
+			}
+			catch (const nlohmann::json::exception& e)
+			{
+				Console::printLine(
+					Console::Mode(Console::GREEN, Console::BRIGHT),
+					"JSONData::WorldServer::handleMessage:",
+					Console::Mode(Console::RED, Console::BRIGHT),
+					" Exception: Couldn't parse JSON: ", e.what());
+				return;
+			}
 		}
 
 		if (!j.contains("data") || !j.contains("target") || !j.contains("packet")) return;
@@ -146,10 +156,22 @@ $hook(void, WorldServer, handleMessage, const Connection::InMessage& message, do
 		};
 		if (!j.contains("packet") || !j.at("packet").is_string() || !j.contains("data"))
 			return;
-		std::vector<uint8_t> msgData = nlohmann::json::to_cbor(j);
-		if (msgData.size() > 1024 * 1024) // 1mb max
-			return;
-		self->server.sendMessage(Connection::OutMessage{ JSONData::S_JSON, msgData.data(), msgData.size() }, target, targetHandle, true);
+
+		if (cbor)
+		{
+			std::vector<uint8_t> msgData = nlohmann::json::to_cbor(j);
+			if (msgData.size() > 1024 * 1024) // 1mb max
+				return;
+			self->server.sendMessage(Connection::OutMessage{ JSONData::S_JSON, msgData.data(), msgData.size() }, target, targetHandle, true);
+		}
+		else
+		{
+			stl::string str = j.dump();
+			if (str.size() > 1024 * 1024) // 1mb max
+				return;
+			self->server.sendMessage(Connection::OutMessage{ JSONData::S_JSON, str }, target, targetHandle, true);
+		}
+
 		return;
 	}
 	return original(self, message, dt);
@@ -168,12 +190,20 @@ $hook(void, WorldClient, handleMessage, const Connection::InMessage& message, Pl
 		}
 		catch (const nlohmann::json::exception& e)
 		{
-			Console::printLine(
-				Console::Mode(Console::GREEN, Console::BRIGHT),
-				"JSONData::WorldClient::handleMessage:",
-				Console::Mode(Console::RED, Console::BRIGHT),
-				" Exception: Couldn't parse JSON: ", e.what());
-			return;
+			// try normal json parsing
+			try
+			{
+				j = nlohmann::json::parse(data, nullptr, true, true);
+			}
+			catch (const nlohmann::json::exception& e)
+			{
+				Console::printLine(
+					Console::Mode(Console::GREEN, Console::BRIGHT),
+					"JSONData::WorldClient::handleMessage:",
+					Console::Mode(Console::RED, Console::BRIGHT),
+					" Exception: Couldn't parse JSON: ", e.what());
+				return;
+			}
 		}
 
 		if (!j.contains("packet") || !j.contains("data") || !j.contains("from") || !j.at("packet").is_string())
